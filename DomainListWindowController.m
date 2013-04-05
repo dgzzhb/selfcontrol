@@ -68,7 +68,7 @@
   unsigned int index = [selected firstIndex];
   int shift = 0;
   while (index != NSNotFound) {
-    if (index < 0 || (index - shift) >= [domainList_ count])
+    if ((index - shift) >= [domainList_ count])
       break;
     [domainList_ removeObjectAtIndex: index - shift];
     shift++;
@@ -196,7 +196,7 @@
   [defaults_ setObject: domainList_ forKey: @"HostBlacklist"];
   [aTableView reloadData];
   [[NSNotificationCenter defaultCenter] postNotificationName: @"SCConfigurationChangedNotification"
-                                                      object: self];  
+    object: self];  
 }
 
 - (void)tableView:(NSTableView *)tableView
@@ -219,7 +219,7 @@
     
     NSArray* splitString = [str componentsSeparatedByString: @"/"];
     
-    str = [splitString objectAtIndex: 0];
+    str = [[splitString objectAtIndex: 0] lowercaseString];
     
     NSString* stringToSearchForPort = str;
     
@@ -261,6 +261,7 @@
                                           predicateWithFormat:@"SELF MATCHES %@",
                                           hostnameValidationRegex
                                           ];
+        
       if(![hostnameRegexTester evaluateWithObject: str] && ![str isEqualToString: @"*"] && ![str isEqualToString: @""]) {
         [cell setTextColor: [NSColor redColor]];
         return;

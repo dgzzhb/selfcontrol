@@ -27,28 +27,21 @@
 @implementation TimerWindowController
 
 - (TimerWindowController*) init {
-  [super init];
-  unsigned int major, minor, bugfix;
-  
-  [SelfControlUtilities getSystemVersionMajor: &major minor: &minor bugFix: &bugfix];
-  
-  if(major <= 10 && minor < 5)
-    isLeopard = NO;
-  else
-    isLeopard = YES;
+  if(self = [super init]) {
+    // We need a block to prevent us from running multiple copies of the "Add to Block"
+    // sheet.
+    addToBlockLock = [[NSLock alloc] init];
         
-  // We need a block to prevent us from running multiple copies of the "Add to Block"
-  // sheet.
-  addToBlockLock = [[NSLock alloc] init];
-      
-  numStrikes = 0;
-  
+    numStrikes = 0;
+  }
+
   return self;
 }
 
 - (void)awakeFromNib {
   [[self window] center];
   [[self window] makeKeyAndOrderFront: self];
+
   
   NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
   
@@ -83,13 +76,23 @@
   else
     // If the block duration is 0, the ending date is... now!
     blockEndingDate_ = [[NSDate date] retain];
+  
   [self updateTimerDisplay: nil];
-  timerUpdater_ = [NSTimer scheduledTimerWithTimeInterval: 1.0
+
+  timerUpdater_ = [NSTimer timerWithTimeInterval: 1.0
                                                    target: self
                                                  selector: @selector(updateTimerDisplay:)
                                                  userInfo: nil
                                                   repeats: YES];
+
+	//If the dialog isn't focused, instead of getting a NSTimer, we get null.
+	//Scheduling the timer from the main thread seems to work.
+	[self performSelectorOnMainThread: @selector(hackAroundMainThreadtimer:) withObject: timerUpdater_ waitUntilDone: YES];
+	
+	
 }
+
+
 
 - (void)blockEnded {
   if(![[NSApp delegate] selfControlLaunchDaemonIsLoaded]) {
@@ -108,23 +111,36 @@
   }
 }
 
-- (void)updateTimerDisplay:(NSTimer*)timer {  
+
+- (void)hackAroundMainThreadtimer:(NSTimer*)timer{
+	[[NSRunLoop currentRunLoop] addTimer: timer forMode: NSDefaultRunLoopMode];
+}
+
+- (void)updateTimerDisplay:(NSTimer*)timer {
+  // update UI for the whole app, in case the block is done with
+  [[NSApp delegate] performSelectorOnMainThread: @selector(refreshUserInterface)
+                                     withObject: nil waitUntilDone: NO];
+  
   int numSeconds = (int) [blockEndingDate_ timeIntervalSinceNow];
   int numHours;
   int numMinutes;
   
   if(numSeconds < 0) {
-    if(isLeopard)
-      [[NSApp dockTile] setBadgeLabel: nil];    
+    [[NSApp dockTile] setBadgeLabel: nil];    
         
     // This increments the strike counter.  After four strikes of the timer being
     // at or less than 0 seconds, SelfControl will assume something's wrong and run
     // scheckup.
     numStrikes++;
         
-    if(numStrikes >= 4) {
-      NSLog(@"WARNING: Block should have ended four seconds ago, starting scheckup");
+    if(numStrikes == 2) {
+      NSLog(@"WARNING: Block should have ended two seconds ago, starting scheckup");
       [self runCheckup];
+    } else if(numStrikes == 30) {
+        // OK, so apparently scheckup couldn't remove the block either
+        // The user needs some help, let's open the FAQ for them.
+        NSLog(@"WARNING: Block should have ended thirty seconds ago! Probable permablock.");
+        [[NSApp delegate] openFAQ: self];
     }
     
     return;
@@ -149,16 +165,18 @@
   [timerLabel_ sizeToFit];
   [self resetStrikes];
   
-  if(isLeopard && [[NSUserDefaults standardUserDefaults] boolForKey: @"BadgeApplicationIcon"]) {
+  if([[NSUserDefaults standardUserDefaults] boolForKey: @"BadgeApplicationIcon"]) {
     // We want to round up the minutes--standard when we aren't displaying seconds.
-    if(numSeconds > 0 && numMinutes != 59)
+    if(numSeconds > 0 && numMinutes != 59) {
       numMinutes++;
+    }
+    
     NSString* badgeString = [NSString stringWithFormat: @"%0.2d:%0.2d",
                                                         numHours,
                                                         numMinutes];
     [[NSApp dockTile] setBadgeLabel: badgeString];
-  } else if(isLeopard) {
-    // If we're on Leopard but aren't using badging, set the badge string to be
+  } else {
+    // If we aren't using badging, set the badge string to be
     // empty to remove any badge if there is one.
     [[NSApp dockTile] setBadgeLabel: nil];
   }
@@ -175,8 +193,9 @@
 - (IBAction) addToBlock:(id)sender {  
   // Check if there's already a thread trying to add a host.  If so, don't make
   // another.
-  if(![addToBlockLock tryLock])
+  if(![addToBlockLock tryLock]) {
     return;
+  }
   
   [NSApp beginSheet: addSheet_
      modalForWindow: [self window]
@@ -208,7 +227,6 @@
 
 - (void)runCheckup {
   [NSTask launchedTaskWithLaunchPath: @"/Library/PrivilegedHelperTools/scheckup" arguments: [NSArray array]];
-  [self resetStrikes];
 }
 
 - (void)dealloc {
